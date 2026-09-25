@@ -425,75 +425,107 @@ elif menu == "4. 신규·폐점 공간 지도":
     map_df["display_type"] = [p[0] for p in props]
     map_df["marker_size"] = [p[1] for p in props]
 
+    # 매장 표시 유형 (display_type) 다중 선택 필터
+    ALL_DISPLAY_TYPES = [
+        "최근 신규 개점 (New Open)",
+        "리저브 (Reserve)",
+        "리저브 DT (Reserve DT)",
+        "드라이브스루 (DT)",
+        "일반 매장 (General)",
+        "폐점 매장 (Closed)",
+    ]
+
+    selected_display_types = st.multiselect(
+        "🏷️ 매장 표시 유형 선택 (중복 선택 가능 · 최근 신규매장만 선택 시 신규점만 표시)",
+        options=ALL_DISPLAY_TYPES,
+        default=ALL_DISPLAY_TYPES,
+    )
+
+    # 선택된 유형으로 필터링 (미선택 시 전체 유지)
+    if selected_display_types:
+        map_df = map_df[map_df["display_type"].isin(selected_display_types)].copy()
+
+    # 표시 매장 수 현황 요약
+    if not map_df.empty:
+        summary_tags = [
+            f"**{t}**: {(map_df['display_type'] == t).sum()}개"
+            for t in ALL_DISPLAY_TYPES
+            if (map_df["display_type"] == t).sum() > 0
+        ]
+        st.markdown(f"📌 **지도 표시 매장 총 {len(map_df):,}개** ({' · '.join(summary_tags)})")
+    else:
+        st.warning("선택하신 매장 유형 조건에 해당하는 매장이 없습니다.")
+
     # 중심 좌표 및 줌 레벨 결정
     geo_target = SIDO_GEO_PRESETS.get(selected_focus_sido, SIDO_GEO_PRESETS["전국 (전체)"])
     center_lat = geo_target["lat"]
     center_lon = geo_target["lon"]
     map_zoom = geo_target["zoom"]
 
-    fig_map = px.scatter_mapbox(
-        map_df,
-        lat="latitude",
-        lon="longitude",
-        color="display_type",
-        size="marker_size",
-        size_max=16,
-        hover_name="store_name",
-        hover_data={
-            "sido": True,
-            "sigungu": True,
-            "store_type": True,
-            "opened_date_best": True,
-            "current_status": True,
-            "address_road": True,
-            "marker_size": False,
-            "latitude": False,
-            "longitude": False,
-        },
-        color_discrete_map={
-            "최근 신규 개점 (New Open)": "#ff4d4f",
-            "리저브 (Reserve)": "#d4af37",
-            "리저브 DT (Reserve DT)": "#722ed1",
-            "드라이브스루 (DT)": "#1890ff",
-            "일반 매장 (General)": "#2d6a4f",
-            "폐점 매장 (Closed)": "#666666",
-        },
-        zoom=map_zoom,
-        center={"lat": center_lat, "lon": center_lon},
-        mapbox_style="open-street-map",
-        height=750,
-    )
-
-    # 마커 테두리(White outline) 및 시각적 대비 극대화
-    fig_map.update_traces(
-        marker=dict(
-            opacity=0.9,
-            allowoverlap=True,
+    if not map_df.empty:
+        fig_map = px.scatter_mapbox(
+            map_df,
+            lat="latitude",
+            lon="longitude",
+            color="display_type",
+            size="marker_size",
+            size_max=16,
+            hover_name="store_name",
+            hover_data={
+                "sido": True,
+                "sigungu": True,
+                "store_type": True,
+                "opened_date_best": True,
+                "current_status": True,
+                "address_road": True,
+                "marker_size": False,
+                "latitude": False,
+                "longitude": False,
+            },
+            color_discrete_map={
+                "최근 신규 개점 (New Open)": "#ff4d4f",
+                "리저브 (Reserve)": "#d4af37",
+                "리저브 DT (Reserve DT)": "#722ed1",
+                "드라이브스루 (DT)": "#1890ff",
+                "일반 매장 (General)": "#2d6a4f",
+                "폐점 매장 (Closed)": "#666666",
+            },
+            zoom=map_zoom,
+            center={"lat": center_lat, "lon": center_lon},
+            mapbox_style="open-street-map",
+            height=750,
         )
-    )
-    fig_map.update_layout(
-        margin=dict(t=10, b=10, l=10, r=10),
-        legend=dict(
-            yanchor="top",
-            y=0.98,
-            xanchor="left",
-            x=0.02,
-            bgcolor="rgba(255, 255, 255, 0.9)",
-            bordercolor="gray",
-            borderwidth=1,
-            font=dict(size=12, color="black"),
-        ),
-    )
 
-    # 마우스 휠 스크롤 줌 활성화 config 적용
-    st.plotly_chart(
-        fig_map,
-        config={
-            "scrollZoom": True,
-            "displayModeBar": True,
-            "modeBarButtonsToRemove": ["lasso2d", "select2d"],
-        },
-    )
+        # 마커 테두리(White outline) 및 시각적 대비 극대화
+        fig_map.update_traces(
+            marker=dict(
+                opacity=0.9,
+                allowoverlap=True,
+            )
+        )
+        fig_map.update_layout(
+            margin=dict(t=10, b=10, l=10, r=10),
+            legend=dict(
+                yanchor="top",
+                y=0.98,
+                xanchor="left",
+                x=0.02,
+                bgcolor="rgba(255, 255, 255, 0.9)",
+                bordercolor="gray",
+                borderwidth=1,
+                font=dict(size=12, color="black"),
+            ),
+        )
+
+        # 마우스 휠 스크롤 줌 활성화 config 적용
+        st.plotly_chart(
+            fig_map,
+            config={
+                "scrollZoom": True,
+                "displayModeBar": True,
+                "modeBarButtonsToRemove": ["lasso2d", "select2d"],
+            },
+        )
 
     st.caption("💡 **지도 조작 팁:** 마우스 휠을 스크롤하여 확대/축소할 수 있으며, 마커 위에 마우스를 올리면 상세 주소와 개점일을 확인할 수 있습니다.")
 
