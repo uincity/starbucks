@@ -566,8 +566,9 @@ elif menu == "4. 신규·폐점 공간 지도":
     map_zoom = geo_target["zoom"]
 
     if not map_df.empty:
-        fig_map = px.scatter_mapbox(
-            map_df,
+        # Plotly 버전 호환성 처리: 최신 Plotly(v6+)에서는 scatter_map을 사용하고 이전 버전에서는 scatter_mapbox로 폴백
+        map_kwargs = dict(
+            data_frame=map_df,
             lat="latitude",
             lon="longitude",
             color="display_type",
@@ -595,9 +596,13 @@ elif menu == "4. 신규·폐점 공간 지도":
             },
             zoom=map_zoom,
             center={"lat": center_lat, "lon": center_lon},
-            mapbox_style="open-street-map",
             height=750,
         )
+
+        if hasattr(px, "scatter_map"):
+            fig_map = px.scatter_map(**map_kwargs, map_style="open-street-map")
+        else:
+            fig_map = px.scatter_mapbox(**map_kwargs, mapbox_style="open-street-map")
 
         # 마커 테두리(White outline) 및 시각적 대비 극대화
         fig_map.update_traces(
