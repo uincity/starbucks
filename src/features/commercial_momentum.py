@@ -11,6 +11,8 @@ import h3
 import numpy as np
 import pandas as pd
 
+from src.processing.sido_utils import standardize_sido, ALL_17_SIDOS
+
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -25,8 +27,11 @@ def generate_area_monthly_metrics(history_df: pd.DataFrame) -> pd.DataFrame:
     months = pd.date_range(start_date, end_date, freq="MS").strftime("%Y-%m").tolist()
 
     # 분석 대상 지역 목록 (시군구)
-    # 빈 시군구 보정
     valid_stores = history_df.copy()
+    valid_stores["sido"] = valid_stores.apply(
+        lambda r: standardize_sido(r["sido"], sigungu_input=r["sigungu"], address_input=r.get("address_road", "")),
+        axis=1,
+    )
     valid_stores["sigungu"] = valid_stores["sigungu"].fillna("기타")
     valid_stores.loc[valid_stores["sigungu"] == "", "sigungu"] = "기타"
     valid_stores["area_name"] = valid_stores["sido"] + " " + valid_stores["sigungu"]
@@ -239,6 +244,12 @@ def build_and_save_momentum_features(base_dir: str = ".") -> Tuple[pd.DataFrame,
         raise FileNotFoundError(f"{hist_file} 파일이 없습니다.")
 
     history_df = pd.read_parquet(hist_file)
+
+    # 0. 시도 명칭 대한민국 표준 17개 광역시도로 일원화
+    history_df["sido"] = history_df.apply(
+        lambda r: standardize_sido(r["sido"], sigungu_input=r["sigungu"], address_input=r.get("address_road", "")),
+        axis=1,
+    )
 
     # 1. H3 인덱스 추가 (Resolution 8 & 9)
     valid_coords = history_df["latitude"].notna() & history_df["longitude"].notna()

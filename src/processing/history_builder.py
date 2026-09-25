@@ -11,11 +11,14 @@ from typing import Dict, Any, List, Optional, Tuple
 import pandas as pd
 import numpy as np
 
+from rapidfuzz import fuzz
+
 from src.processing.entity_resolution import (
     calculate_match_score,
     normalize_store_name,
     haversine_distance_meters,
 )
+from src.processing.sido_utils import standardize_sido
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -151,7 +154,7 @@ def build_store_history_and_events(base_dir: str = ".") -> Tuple[pd.DataFrame, p
             "store_name": c_name,
             "latitude": lat,
             "longitude": lon,
-            "sido": curr["sido"],
+            "sido": standardize_sido(curr["sido"], sigungu_input=curr["sigungu"], address_input=addr),
             "sigungu": curr["sigungu"],
             "address_road": addr,
             "address_jibun": curr["address_jibun"],
@@ -207,7 +210,7 @@ def build_store_history_and_events(base_dir: str = ".") -> Tuple[pd.DataFrame, p
             "store_name": l_name,
             "latitude": leg["latitude"],
             "longitude": leg["longitude"],
-            "sido": leg["sido"],
+            "sido": standardize_sido(leg["sido"], sigungu_input=leg["sigungu"], address_input=leg["address_road"]),
             "sigungu": leg["sigungu"],
             "address_road": leg["address_road"],
             "address_jibun": "",

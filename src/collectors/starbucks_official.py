@@ -115,13 +115,14 @@ def normalize_store_record(raw: Dict[str, Any], snapshot_date: str) -> Dict[str,
     else:
         open_dt = None
 
-    # 시도 / 시군구
-    sido = (raw.get("sido_name") or "").strip()
+    # 시도 / 시군구 표준화
+    from src.processing.sido_utils import standardize_sido
+    raw_sido = (raw.get("sido_name") or "").strip()
     sigungu = (raw.get("gugun_name") or "").strip()
-
-    # 도로명 주소 및 지번 주소
     doro = (raw.get("doro_address") or "").strip()
     jibun = (raw.get("addr") or "").strip()
+
+    sido = standardize_sido(raw_sido, sigungu=sigungu, address_input=doro or jibun)
 
     return {
         "snapshot_date": snapshot_date,

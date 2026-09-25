@@ -16,46 +16,7 @@ import pandas as pd
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
 
-# 대한민국 17개 광역 시도 표준 정규화 사전
-SIDO_MAP = {
-    "서울": "서울특별시",
-    "서울특별시": "서울특별시",
-    "경기": "경기도",
-    "경기도": "경기도",
-    "인천": "인천광역시",
-    "인천광역시": "인천광역시",
-    "부산": "부산광역시",
-    "부산광역시": "부산광역시",
-    "대구": "대구광역시",
-    "대구광역시": "대구광역시",
-    "광주": "광주광역시",
-    "광주광역시": "광주광역시",
-    "대전": "대전광역시",
-    "대전광역시": "대전광역시",
-    "울산": "울산광역시",
-    "울산광역시": "울산광역시",
-    "세종": "세종특별자치시",
-    "세종특별자치시": "세종특별자치시",
-    "강원": "강원특별자치도",
-    "강원도": "강원특별자치도",
-    "강원특별자치도": "강원특별자치도",
-    "충북": "충청북도",
-    "충청북도": "충청북도",
-    "충남": "충청남도",
-    "충청남도": "충청남도",
-    "전북": "전북특별자치도",
-    "전라북도": "전북특별자치도",
-    "전북특별자치도": "전북특별자치도",
-    "전남": "전라남도",
-    "전라남도": "전라남도",
-    "경북": "경상북도",
-    "경상북도": "경상북도",
-    "경남": "경상남도",
-    "경상남도": "경상남도",
-    "제주": "제주특별자치도",
-    "제주도": "제주특별자치도",
-    "제주특별자치도": "제주특별자치도",
-}
+from src.processing.sido_utils import standardize_sido, ALL_17_SIDOS
 
 
 def extract_snapshot_date(file_path: str) -> Optional[str]:
@@ -93,7 +54,6 @@ def parse_address_sido_sigungu(addr: str) -> Tuple[str, str]:
         return "", ""
 
     raw_sido = tokens[0]
-    sido = SIDO_MAP.get(raw_sido, raw_sido)
 
     sigungu = ""
     if len(tokens) > 1:
@@ -102,6 +62,7 @@ def parse_address_sido_sigungu(addr: str) -> Tuple[str, str]:
         if len(tokens) > 2 and tokens[1].endswith("시") and (tokens[2].endswith("구") or tokens[2].endswith("군")):
             sigungu = f"{tokens[1]} {tokens[2]}"
 
+    sido = standardize_sido(raw_sido, sigungu=sigungu, address_input=addr)
     return sido, sigungu
 
 
@@ -169,7 +130,7 @@ def normalize_legacy_file(file_path: str) -> Optional[pd.DataFrame]:
 
         # 시도/시군구 결정
         if sido_col and pd.notna(row[sido_col]):
-            sido_val = SIDO_MAP.get(str(row[sido_col]).strip(), str(row[sido_col]).strip())
+            sido_val = standardize_sido(str(row[sido_col]).strip(), address_input=raw_addr)
         else:
             sido_val, _ = parse_address_sido_sigungu(raw_addr)
 
@@ -177,6 +138,9 @@ def normalize_legacy_file(file_path: str) -> Optional[pd.DataFrame]:
             sigungu_val = str(row[sigungu_col]).strip()
         else:
             _, sigungu_val = parse_address_sido_sigungu(raw_addr)
+
+        # 재확인: 전남광주 등의 경우 sigungu로 sido 재보정
+        sido_val = standardize_sido(sido_val, sigungu=sigungu_val, address_input=raw_addr)
 
         # 위경도 변환
         try:
