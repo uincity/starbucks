@@ -8,8 +8,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
 import streamlit as st
+
+from src.visualization.timeline_map import render_timeline_section
 
 # 페이지 기본 설정
 st.set_page_config(
@@ -441,6 +442,13 @@ elif menu == "3. 지역 심층 분석 (Drill-down)":
                     use_container_width=True,
                     height=350,
                 )
+
+        # 6. 최하단 독립 섹션: 스타벅스 매장 변화 타임라인 (Event-driven Timeline Map)
+        render_timeline_section(
+            history_df=history_df,
+            sido=selected_sido,
+            sigungu=selected_sigungu,
+        )
 
 # -------------------------------------------------------------
 # 메뉴 4: 신규·폐점 공간 지도
