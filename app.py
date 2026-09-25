@@ -353,11 +353,43 @@ elif menu == "3. 지역 심층 분석 (Drill-down)":
 # -------------------------------------------------------------
 elif menu == "4. 신규·폐점 공간 지도":
     st.title("🗺️ 전국 신규·기존·폐점 매장 공간 인터랙티브 맵")
+    st.markdown("마우스 휠 스크롤로 자유롭게 확대·축소할 수 있으며, 광역시도를 선택하면 해당 지역으로 지도가 자동 포커싱됩니다.")
 
-    period_filter = st.selectbox(
-        "신규 매장 관측 기간 선택",
-        ["최근 12개월 (2025-10 ~ 현재)", "최근 24개월 (2024-10 ~ 현재)", "전체 기간"],
-    )
+    # 17개 광역시도 중심 좌표 및 최적 줌 레벨 사전
+    SIDO_GEO_PRESETS = {
+        "전국 (전체)": {"lat": 36.3, "lon": 127.8, "zoom": 6.8},
+        "서울특별시": {"lat": 37.5665, "lon": 126.9780, "zoom": 11.2},
+        "부산광역시": {"lat": 35.1796, "lon": 129.0756, "zoom": 11.0},
+        "대구광역시": {"lat": 35.8714, "lon": 128.6014, "zoom": 11.0},
+        "인천광역시": {"lat": 37.4563, "lon": 126.7052, "zoom": 10.5},
+        "광주광역시": {"lat": 35.1595, "lon": 126.8526, "zoom": 11.5},
+        "대전광역시": {"lat": 36.3504, "lon": 127.3845, "zoom": 11.5},
+        "울산광역시": {"lat": 35.5384, "lon": 129.3114, "zoom": 11.2},
+        "세종특별자치시": {"lat": 36.4800, "lon": 127.2890, "zoom": 11.8},
+        "경기도": {"lat": 37.4138, "lon": 127.5183, "zoom": 9.2},
+        "강원특별자치도": {"lat": 37.8228, "lon": 128.1555, "zoom": 8.6},
+        "충청북도": {"lat": 36.8000, "lon": 127.7000, "zoom": 8.8},
+        "충청남도": {"lat": 36.5184, "lon": 126.8000, "zoom": 8.8},
+        "전북특별자치도": {"lat": 35.7175, "lon": 127.1530, "zoom": 8.8},
+        "전라남도": {"lat": 34.8679, "lon": 126.9910, "zoom": 8.6},
+        "경상북도": {"lat": 36.4919, "lon": 128.8889, "zoom": 8.5},
+        "경상남도": {"lat": 35.4606, "lon": 128.2132, "zoom": 8.8},
+        "제주특별자치도": {"lat": 33.3846, "lon": 126.5535, "zoom": 9.8},
+    }
+
+    # 상단 컨트롤 필터 (광역시도 포커싱 + 신규 관측 기간 + 필터 옵션)
+    col_map1, col_map2, col_map3 = st.columns([2, 2, 2])
+    with col_map1:
+        sido_choices = list(SIDO_GEO_PRESETS.keys())
+        selected_focus_sido = st.selectbox("🎯 광역시도 선택 (지도 포커싱)", options=sido_choices, index=0)
+    with col_map2:
+        period_filter = st.selectbox(
+            "⏱️ 신규 매장 관측 기간",
+            ["최근 12개월 (2025-10 ~ 현재)", "최근 24개월 (2024-10 ~ 현재)", "전체 기간"],
+            index=0,
+        )
+    with col_map3:
+        only_selected_sido = st.checkbox("선택한 시도 매장만 보기", value=False if selected_focus_sido == "전국 (전체)" else True)
 
     now_dt = pd.to_datetime("2026-09-25")
     if "12개월" in period_filter:
@@ -370,44 +402,100 @@ elif menu == "4. 신규·폐점 공간 지도":
     map_df = history_df[history_df["latitude"].notna() & history_df["longitude"].notna()].copy()
     map_df["opened_dt"] = pd.to_datetime(map_df["opened_date_best"])
 
-    # 매장 상태 태그 분류
-    def tag_store(row):
-        if row["current_status"] == "CLOSED":
-            return "폐점 매장 (Closed)"
-        elif row["opened_dt"] >= cutoff_dt:
-            return "최근 신규 개점 (New Open)"
-        elif row["is_reserve"] and row["is_dt"]:
-            return "리저브 DT (Reserve DT)"
-        elif row["is_reserve"]:
-            return "리저브 (Reserve)"
-        elif row["is_dt"]:
-            return "드라이브스루 (DT)"
-        else:
-            return "일반 매장 (General)"
+    # 시도 필터링 적용 (토글 체크 시)
+    if only_selected_sido and selected_focus_sido != "전국 (전체)":
+        map_df = map_df[map_df["sido"] == selected_focus_sido].copy()
 
-    map_df["display_type"] = map_df.apply(tag_store, axis=1)
+    # 매장 상태 태그 및 마커 크기 정의 (시각적 구분 강화)
+    def assign_display_props(row):
+        if row["current_status"] == "CLOSED":
+            return "폐점 매장 (Closed)", 12
+        elif row["opened_dt"] >= cutoff_dt:
+            return "최근 신규 개점 (New Open)", 15
+        elif row["is_reserve"] and row["is_dt"]:
+            return "리저브 DT (Reserve DT)", 16
+        elif row["is_reserve"]:
+            return "리저브 (Reserve)", 15
+        elif row["is_dt"]:
+            return "드라이브스루 (DT)", 13
+        else:
+            return "일반 매장 (General)", 11
+
+    props = map_df.apply(assign_display_props, axis=1)
+    map_df["display_type"] = [p[0] for p in props]
+    map_df["marker_size"] = [p[1] for p in props]
+
+    # 중심 좌표 및 줌 레벨 결정
+    geo_target = SIDO_GEO_PRESETS.get(selected_focus_sido, SIDO_GEO_PRESETS["전국 (전체)"])
+    center_lat = geo_target["lat"]
+    center_lon = geo_target["lon"]
+    map_zoom = geo_target["zoom"]
 
     fig_map = px.scatter_mapbox(
         map_df,
         lat="latitude",
         lon="longitude",
         color="display_type",
+        size="marker_size",
+        size_max=16,
         hover_name="store_name",
-        hover_data=["sido", "sigungu", "opened_date_best", "store_type"],
+        hover_data={
+            "sido": True,
+            "sigungu": True,
+            "store_type": True,
+            "opened_date_best": True,
+            "current_status": True,
+            "address_road": True,
+            "marker_size": False,
+            "latitude": False,
+            "longitude": False,
+        },
         color_discrete_map={
             "최근 신규 개점 (New Open)": "#ff4d4f",
             "리저브 (Reserve)": "#d4af37",
             "리저브 DT (Reserve DT)": "#722ed1",
             "드라이브스루 (DT)": "#1890ff",
-            "일반 매장 (General)": "#52c41a",
-            "폐점 매장 (Closed)": "#8c8c8c",
+            "일반 매장 (General)": "#2d6a4f",
+            "폐점 매장 (Closed)": "#666666",
         },
-        zoom=7,
-        center={"lat": 36.3, "lon": 127.8},
+        zoom=map_zoom,
+        center={"lat": center_lat, "lon": center_lon},
         mapbox_style="open-street-map",
-        height=700,
+        height=750,
     )
-    st.plotly_chart(fig_map)
+
+    # 마커 테두리(White outline) 및 시각적 대비 극대화
+    fig_map.update_traces(
+        marker=dict(
+            opacity=0.9,
+            allowoverlap=True,
+        )
+    )
+    fig_map.update_layout(
+        margin=dict(t=10, b=10, l=10, r=10),
+        legend=dict(
+            yanchor="top",
+            y=0.98,
+            xanchor="left",
+            x=0.02,
+            bgcolor="rgba(255, 255, 255, 0.9)",
+            bordercolor="gray",
+            borderwidth=1,
+            font=dict(size=12, color="black"),
+        ),
+    )
+
+    # 마우스 휠 스크롤 줌 활성화 config 적용
+    st.plotly_chart(
+        fig_map,
+        config={
+            "scrollZoom": True,
+            "displayModeBar": True,
+            "modeBarButtonsToRemove": ["lasso2d", "select2d"],
+        },
+    )
+
+    st.caption("💡 **지도 조작 팁:** 마우스 휠을 스크롤하여 확대/축소할 수 있으며, 마커 위에 마우스를 올리면 상세 주소와 개점일을 확인할 수 있습니다.")
 
 # -------------------------------------------------------------
 # 메뉴 5: 개별 매장 History 검색
