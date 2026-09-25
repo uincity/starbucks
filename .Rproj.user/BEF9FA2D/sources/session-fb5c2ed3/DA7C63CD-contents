@@ -1,0 +1,56 @@
+library(readxl)
+library(xlsx)
+library(tidyverse)
+
+library(DataExplorer)
+
+
+st_data <- read_excel('./data/startbucks_store_list_20250827.xlsx')
+
+st_data %>% View()
+
+glimpse(st_data)
+str(st_data)
+summary(st_data)
+
+#데이터 처리
+#1. 지역 구분 : 광역 17개 단위
+#2. 지역 구분 : 시군구
+#3. 지역 구분 : 동만 뽑기
+
+
+
+#1. 지역 구분 : 광역 17개 단위
+st_data2 <- 
+  st_data %>% 
+  mutate(
+    시도 = str_split(주소, pattern = " ", simplify = T, n = 3)[,1],
+    시군 = str_split(주소, pattern = " ", simplify = T, n = 3)[,2],
+    도로명 = str_split(주소, pattern = " ", simplify = T, n = 3)[,3]
+  )
+
+st_data2 %>% View()
+
+
+#동 추출
+x <- c("(역삼동)","서울특별시 강남구 언주로 425 (역삼동,다다)","서울특별시 강남구 남부순환로 2947 [대치동]")
+#str_extract(x,"\\((.*?)\\)")
+#str_extract_all(x,"\\((.*?)\\)")
+#str_extract_all(x,"\\((.*?)\\)",simplify = TRUE)[,1]
+#str_extract_all(x,"\\((.*?)\\,",simplify = TRUE)[,1]
+#str_extract_all(x,"(.*?)\\,",simplify = TRUE)[,1]
+
+st_data3 <- 
+  st_data2 %>% mutate( 동명 = str_extract_all(주소,pattern = "\\((.*?)\\)",simplify = TRUE)[,1])
+
+
+write.xlsx2(st_data3, file="./data/스타벅스_20230619.xlsx", sheetName = "Sheet1", 
+            col.names = TRUE, row.names = TRUE, append = FALSE)
+
+
+is.na(st_data3$동명)
+
+
+st_data3 %>% filter(동명=="")
+
+

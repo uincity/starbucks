@@ -1,0 +1,11 @@
+requests>=2.31.0
+pandas>=2.2.0
+pyarrow>=15.0.0
+duckdb>=1.2.0
+rapidfuzz>=3.8.0
+pyproj>=3.6.0
+h3>=4.1.0
+plotly>=5.20.0
+streamlit>=1.33.0
+pytest>=8.0.0
+openpyxl>=3.1.2

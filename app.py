@@ -1,0 +1,378 @@
+"""
+스타벅스 전국 매장 시계열 데이터 및 상권 모멘텀 분석 Streamlit 대시보드.
+실행 방법: streamlit run app.py
+"""
+
+import math
+from datetime import datetime, timedelta
+from pathlib import Path
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import streamlit as st
+
+# 페이지 기본 설정
+st.set_page_config(
+    page_title="스타벅스 상권 모멘텀 대시보드",
+    page_icon="☕",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+DATA_DIR = Path("data/processed")
+REPORTS_DIR = Path("reports")
+
+
+@st.cache_data
+def load_all_data():
+    hist_file = DATA_DIR / "store_history.parquet"
+    monthly_file = DATA_DIR / "area_monthly_metrics.parquet"
+    rank_file = DATA_DIR / "area_momentum_rank.parquet"
+    audit_file = REPORTS_DIR / "match_audit.csv"
+
+    history_df = pd.read_parquet(hist_file) if hist_file.exists() else pd.DataFrame()
+    monthly_df = pd.read_parquet(monthly_file) if monthly_file.exists() else pd.DataFrame()
+    rank_df = pd.read_parquet(rank_file) if rank_file.exists() else pd.DataFrame()
+    audit_df = pd.read_csv(audit_file) if audit_file.exists() else pd.DataFrame()
+
+    return history_df, monthly_df, rank_df, audit_df
+
+
+history_df, monthly_df, rank_df, audit_df = load_all_data()
+
+# 사이드바 네비게이션
+st.sidebar.title("☕ 스타벅스 상권 분석")
+st.sidebar.caption("시계열 데이터 기반 지역 상권 모멘텀 추적 시스템")
+
+menu = st.sidebar.radio(
+    "메뉴 선택",
+    [
+        "1. 전국 Overview",
+        "2. 상권 Momentum 순위 & 4분면",
+        "3. 지역 심층 분석 (Drill-down)",
+        "4. 신규·폐점 공간 지도",
+        "5. 개별 매장 History 검색",
+        "6. 데이터 품질 및 Audit",
+    ],
+)
+
+st.sidebar.markdown("---")
+st.sidebar.info(
+    "💡 **분석 원칙**\n"
+    "스타벅스 출점을 상권 성장의 직접적 인과로 단정하지 않고, "
+    "상권 규모·소비력·유동인구 변화를 보여주는 **보조 모멘텀 신호**로 활용합니다."
+)
+
+if history_df.empty or rank_df.empty:
+    st.error("데이터 파일이 준비되지 않았습니다. 파이프라인을 먼저 실행하세요.")
+    st.stop()
+
+# -------------------------------------------------------------
+# 메뉴 1: 전국 Overview
+# -------------------------------------------------------------
+if menu == "1. 전국 Overview":
+    st.title("📊 전국 스타벅스 인프라 현황 & 종합 KPI")
+    st.markdown("전국 스타벅스 매장의 현재 분포와 최근 12개월간의 개폐점 순변화를 조망합니다.")
+
+    # KPI 지표 카드
+    curr_stores = (history_df["current_status"] == "OPERATING").sum()
+    dt_stores = (history_df["is_dt"] & (history_df["current_status"] == "OPERATING")).sum()
+    res_stores = (history_df["is_reserve"] & (history_df["current_status"] == "OPERATING")).sum()
+
+    tot_12m_opened = rank_df["opened_12m"].sum()
+    tot_12m_closed = rank_df["closed_12m"].sum()
+    tot_12m_net = tot_12m_opened - tot_12m_closed
+
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("전국 운영 매장 수", f"{curr_stores:,}개")
+    col2.metric("최근 12개월 신규 개점", f"+{tot_12m_opened:,}개")
+    col3.metric("최근 12개월 폐점", f"-{tot_12m_closed:,}개")
+    col4.metric("최근 12개월 순증가", f"{tot_12m_net:+,}개", delta=f"{tot_12m_net} net")
+    col5.metric("DT 점유율 (전국)", f"{dt_stores/curr_stores*100:.1f}%", f"{dt_stores}개 DT")
+
+    st.markdown("---")
+
+    col_chart1, col_chart2 = st.columns([3, 2])
+
+    with col_chart1:
+        st.subheader("📈 전국 월별 누적 매장 수 추이 (2021 ~ 현재)")
+        monthly_nat = monthly_df.groupby("year_month").agg(
+            stores_end=("stores_end", "sum"),
+            opened=("opened", "sum"),
+            closed=("closed", "sum"),
+            net_change=("net_change", "sum"),
+        ).reset_index()
+
+        fig_line = px.line(
+            monthly_nat,
+            x="year_month",
+            y="stores_end",
+            markers=True,
+            title="전국 스타벅스 운영 매장 수 시계열 추이",
+            labels={"year_month": "연월", "stores_end": "총 매장 수"},
+            template="plotly_white",
+        )
+        fig_line.update_traces(line_color="#006241", line_width=3)
+        st.plotly_chart(fig_line, use_container_width=True)
+
+    with col_chart2:
+        st.subheader("🗺️ 시도별 매장 수 분포")
+        sido_counts = history_df[history_df["current_status"] == "OPERATING"]["sido"].value_counts().reset_index()
+        sido_counts.columns = ["시도", "매장수"]
+        fig_bar = px.bar(
+            sido_counts.head(10),
+            x="매장수",
+            y="시도",
+            orientation="h",
+            color="매장수",
+            color_continuous_scale="Greens",
+            template="plotly_white",
+        )
+        fig_bar.update_layout(yaxis={"autorange": "reversed"})
+        st.plotly_chart(fig_bar, use_container_width=True)
+
+# -------------------------------------------------------------
+# 메뉴 2: 상권 Momentum 순위 & 4분면
+# -------------------------------------------------------------
+elif menu == "2. 상권 Momentum 순위 & 4분면":
+    st.title("🚀 지역별 상권 모멘텀 순위 및 4분면 분석")
+    st.markdown(
+        "단순 현재 매장 수가 아니라 **최근 12개월 순증가폭**과 **직전 12개월 대비 가속도**를 결합한 "
+        "**SB Commercial Momentum Score**를 기반으로 지역 상권의 확장 속도를 비교합니다."
+    )
+
+    # 필터
+    col_f1, col_f2, col_f3 = st.columns(3)
+    with col_f1:
+        sido_filter = st.multiselect("시도 필터", options=sorted(rank_df["sido"].unique()), default=[])
+    with col_f2:
+        status_filter = st.multiselect("모멘텀 상태 필터", options=sorted(rank_df["momentum_status"].unique()), default=[])
+    with col_f3:
+        min_stores = st.slider("최소 매장 수 필터", min_value=1, max_value=50, value=2)
+
+    filtered_rank = rank_df[rank_df["store_count_current"] >= min_stores].copy()
+    if sido_filter:
+        filtered_rank = filtered_rank[filtered_rank["sido"].isin(sido_filter)]
+    if status_filter:
+        filtered_rank = filtered_rank[filtered_rank["momentum_status"].isin(status_filter)]
+
+    # 4분면 매트릭스 산점도
+    st.subheader("🎯 상권 변화 4분면 매트릭스 (직전 12M vs 최근 12M 순증감)")
+    st.caption("1사분면(우상단): 가속 성장 | 2사분면(좌상단): 신규 반등/급가속 | 4사분면(우하단): 성장 둔화")
+
+    fig_quad = px.scatter(
+        filtered_rank,
+        x="net_change_prev_12m",
+        y="net_change_12m",
+        color="momentum_status",
+        size="store_count_current",
+        hover_name="area_name",
+        hover_data=["store_count_current", "opening_acceleration", "sb_momentum_score"],
+        labels={
+            "net_change_prev_12m": "직전 12개월 순증감 (Net Change Prev 12M)",
+            "net_change_12m": "최근 12개월 순증감 (Net Change Recent 12M)",
+            "momentum_status": "모멘텀 상태",
+        },
+        template="plotly_white",
+    )
+    # 기준선 (0,0) 및 대각선(y=x: 가속/감속 분기)
+    fig_quad.add_hline(y=0, line_dash="dash", line_color="gray")
+    fig_quad.add_vline(x=0, line_dash="dash", line_color="gray")
+    st.plotly_chart(fig_quad, use_container_width=True)
+
+    # 랭킹 테이블
+    st.subheader("📋 상권 모멘텀 종합 랭킹 테이블")
+    display_cols = [
+        "momentum_rank", "area_name", "store_count_current", "opened_12m", "closed_12m",
+        "net_change_12m", "net_change_prev_12m", "opening_acceleration", "growth_12m",
+        "dt_share", "sb_momentum_score", "momentum_status"
+    ]
+    st.dataframe(
+        filtered_rank[display_cols].rename(columns={
+            "momentum_rank": "순위",
+            "area_name": "지역명",
+            "store_count_current": "현재매장",
+            "opened_12m": "12M신규",
+            "closed_12m": "12M폐점",
+            "net_change_12m": "12M순증감",
+            "net_change_prev_12m": "직전12M순증감",
+            "opening_acceleration": "출점가속도",
+            "growth_12m": "증가율(%)",
+            "dt_share": "DT비율(%)",
+            "sb_momentum_score": "SB모멘텀스코어",
+            "momentum_status": "모멘텀상태",
+        }),
+        use_container_width=True,
+    )
+
+# -------------------------------------------------------------
+# 메뉴 3: 지역 심층 분석 (Drill-down)
+# -------------------------------------------------------------
+elif menu == "3. 지역 심층 분석 (Drill-down)":
+    st.title("🔍 지역 심층 드릴다운 (Drill-down)")
+
+    col_sel1, col_sel2 = st.columns(2)
+    with col_sel1:
+        selected_sido = st.selectbox("시도 선택", options=sorted(rank_df["sido"].unique()), index=0)
+    with col_sel2:
+        sigungu_opts = sorted(rank_df[rank_df["sido"] == selected_sido]["sigungu"].unique())
+        selected_sigungu = st.selectbox("시군구 선택", options=sigungu_opts, index=0)
+
+    area_key = f"{selected_sido} {selected_sigungu}"
+    area_info = rank_df[rank_df["area_name"] == area_key]
+
+    if not area_info.empty:
+        info = area_info.iloc[0]
+        st.subheader(f"📍 {area_key} 상권 프로파일")
+
+        m1, m2, m3, m4, m5 = st.columns(5)
+        m1.metric("현재 매장 수", f"{info['store_count_current']}개")
+        m2.metric("최근 12M 순증감", f"{info['net_change_12m']:+d}개")
+        m3.metric("출점 가속도", f"{info['opening_acceleration']:+d}개")
+        m4.metric("DT 점유율", f"{info['dt_share']}% ({info['dt_count']}개)")
+        m5.metric("SB 모멘텀 스코어", f"{info['sb_momentum_score']}점", f"상태: {info['momentum_status']}")
+
+        # 시계열 추이
+        sub_monthly = monthly_df[monthly_df["area_name"] == area_key].sort_values("year_month")
+        fig_sub = px.line(
+            sub_monthly,
+            x="year_month",
+            y="stores_end",
+            markers=True,
+            title=f"{area_key} 매장 수 월별 시계열 변화",
+            labels={"year_month": "연월", "stores_end": "매장 수"},
+            template="plotly_white",
+        )
+        fig_sub.update_traces(line_color="#1e3932", line_width=2)
+        st.plotly_chart(fig_sub, use_container_width=True)
+
+        # 해당 지역 매장 목록
+        st.subheader(f"🏪 {area_key} 매장 목록")
+        area_stores = history_df[(history_df["sido"] == selected_sido) & (history_df["sigungu"] == selected_sigungu)]
+        st.dataframe(
+            area_stores[[
+                "store_name", "store_type", "opened_date_best", "current_status",
+                "closed_date_best", "address_road", "is_dt", "is_reserve"
+            ]].rename(columns={
+                "store_name": "매장명",
+                "store_type": "유형",
+                "opened_date_best": "개점일(추정)",
+                "current_status": "운영상태",
+                "closed_date_best": "폐점일",
+                "address_road": "도로명주소",
+                "is_dt": "DT여부",
+                "is_reserve": "리저브",
+            }),
+            use_container_width=True,
+        )
+
+# -------------------------------------------------------------
+# 메뉴 4: 신규·폐점 공간 지도
+# -------------------------------------------------------------
+elif menu == "4. 신규·폐점 공간 지도":
+    st.title("🗺️ 전국 신규·기존·폐점 매장 공간 인터랙티브 맵")
+
+    period_filter = st.selectbox(
+        "신규 매장 관측 기간 선택",
+        ["최근 12개월 (2025-10 ~ 현재)", "최근 24개월 (2024-10 ~ 현재)", "전체 기간"],
+    )
+
+    now_dt = pd.to_datetime("2026-09-25")
+    if "12개월" in period_filter:
+        cutoff_dt = now_dt - pd.DateOffset(months=12)
+    elif "24개월" in period_filter:
+        cutoff_dt = now_dt - pd.DateOffset(months=24)
+    else:
+        cutoff_dt = pd.to_datetime("1990-01-01")
+
+    map_df = history_df[history_df["latitude"].notna() & history_df["longitude"].notna()].copy()
+    map_df["opened_dt"] = pd.to_datetime(map_df["opened_date_best"])
+
+    # 매장 상태 태그 분류
+    def tag_store(row):
+        if row["current_status"] == "CLOSED":
+            return "폐점 매장 (Closed)"
+        elif row["opened_dt"] >= cutoff_dt:
+            return "신규 개점 매장 (New Open)"
+        elif row["is_dt"]:
+            return "드라이브스루 (DT)"
+        elif row["is_reserve"]:
+            return "리저브 (Reserve)"
+        else:
+            return "일반 매장 (General)"
+
+    map_df["display_type"] = map_df.apply(tag_store, axis=1)
+
+    fig_map = px.scatter_mapbox(
+        map_df,
+        lat="latitude",
+        lon="longitude",
+        color="display_type",
+        hover_name="store_name",
+        hover_data=["sido", "sigungu", "opened_date_best", "store_type"],
+        color_discrete_map={
+            "신규 개점 매장 (New Open)": "#ff4d4f",
+            "드라이브스루 (DT)": "#1890ff",
+            "리저브 (Reserve)": "#faad14",
+            "일반 매장 (General)": "#52c41a",
+            "폐점 매장 (Closed)": "#8c8c8c",
+        },
+        zoom=7,
+        center={"lat": 36.3, "lon": 127.8},
+        mapbox_style="open-street-map",
+        height=700,
+    )
+    st.plotly_chart(fig_map, use_container_width=True)
+
+# -------------------------------------------------------------
+# 메뉴 5: 개별 매장 History 검색
+# -------------------------------------------------------------
+elif menu == "5. 개별 매장 History 검색":
+    st.title("🔎 개별 스타벅스 매장 생애주기 검색기")
+    st.markdown("전국 2,417개 매장(현재 운영 + 과거 폐점)의 개점일, 폐점일, 출처, 신뢰도를 조회합니다.")
+
+    search_kw = st.text_input("매장명 검색 (예: 여의도, 해운대, 송파, 광화문)", value="")
+
+    if search_kw.strip():
+        searched = history_df[history_df["store_name"].str.contains(search_kw.strip(), case=False, na=False)]
+        st.write(f"검색 결과: 총 **{len(searched)}개** 매장")
+
+        for _, r in searched.head(10).iterrows():
+            with st.expander(f"📍 {r['store_name']} ({r['current_status']}) - {r['sido']} {r['sigungu']}"):
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.write(f"**매장 ID:** `{r['store_id']}`")
+                    st.write(f"**매장 유형:** {r['store_type']} (DT: {r['is_dt']}, Reserve: {r['is_reserve']})")
+                    st.write(f"**개점일(Best):** `{r['opened_date_best']}` (신뢰도: **{r['opened_date_confidence']}**, 출처: {r['opened_date_source']})")
+                    if r["current_status"] == "CLOSED":
+                        st.write(f"**폐점일(Best):** `{r['closed_date_best']}` (출처: {r['closed_date_source']})")
+                with c2:
+                    st.write(f"**도로명주소:** {r['address_road']}")
+                    st.write(f"**최초 관측일:** `{r['first_seen_date']}`")
+                    st.write(f"**최종 관측일:** `{r['last_seen_date']}`")
+                    st.write(f"**좌표 (WGS84):** ({r['latitude']}, {r['longitude']})")
+
+# -------------------------------------------------------------
+# 메뉴 6: 데이터 품질 및 Audit
+# -------------------------------------------------------------
+elif menu == "6. 데이터 품질 및 Audit":
+    st.title("🛡️ 데이터 정합성 검증 및 매칭 Audit")
+
+    if not audit_df.empty:
+        col_q1, col_q2, col_q3 = st.columns(3)
+        col_q1.metric("HIGH 신뢰도 매칭", f"{(audit_df['match_grade'] == 'MATCH_HIGH').sum():,}건")
+        col_q2.metric("MEDIUM 신뢰도 매칭", f"{(audit_df['match_grade'] == 'MATCH_MEDIUM').sum():,}건")
+        col_q3.metric("신규 매칭 후보 (UNMATCHED)", f"{(audit_df['match_grade'] == 'UNMATCHED').sum():,}건")
+
+        st.subheader("매칭 감사 로그 (Match Audit)")
+        grade_filter = st.multiselect("매칭 등급 필터", options=audit_df["match_grade"].unique(), default=[])
+        if grade_filter:
+            st.dataframe(audit_df[audit_df["match_grade"].isin(grade_filter)], use_container_width=True)
+        else:
+            st.dataframe(audit_df.head(50), use_container_width=True)
+
+    dq_file = REPORTS_DIR / "data_quality_report.md"
+    if dq_file.exists():
+        st.markdown("---")
+        st.subheader("📄 Data Quality Report 전문")
+        st.markdown(dq_file.read_text(encoding="utf-8"))
