@@ -155,14 +155,20 @@ def normalize_legacy_file(file_path: str) -> Optional[pd.DataFrame]:
 
         # 매장 유형 결정
         raw_type = str(row[type_col]).strip() if type_col and pd.notna(row[type_col]) else ""
-        is_dt = bool("DT" in store_name or "generalDT" in raw_type or "드라이브스루" in store_name)
-        is_reserve = bool(store_name.endswith("R") or "리저브" in store_name or "reserve" in raw_type.lower())
+        is_dt = bool("DT" in store_name or "generalDT" in raw_type or "reserveDT" in raw_type or "드라이브스루" in store_name)
+        has_r_name = bool(
+            "리저브" in store_name or
+            (re.search(r"R$|R\s|R점", store_name) and not re.search(r"DSR|SDR", store_name, re.I))
+        )
+        is_reserve = bool(has_r_name or "pin_reserve" in raw_type or "reserve" in raw_type.lower())
         is_community = bool("커뮤니티" in store_name)
 
-        if is_dt:
-            stype = "DT"
+        if is_dt and is_reserve:
+            stype = "Reserve DT"
         elif is_reserve:
             stype = "Reserve"
+        elif is_dt:
+            stype = "DT"
         elif is_community:
             stype = "Community"
         else:

@@ -92,17 +92,29 @@ def normalize_store_record(raw: Dict[str, Any], snapshot_date: str) -> Dict[str,
     except (ValueError, TypeError):
         longitude = None
 
-    # 매장 특성 분류 (DT, Reserve, Community)
+    # 매장 특성 분류 (공식 스타벅스 store_core.js 테마 코드 기준: T01=DT, T03=Reserve)
     theme_state = str(raw.get("theme_state") or "")
-    is_dt = bool(re.search(r"DT\b|드라이브스루", store_name, re.I))
-    is_reserve = bool(store_name.endswith("R") or "리저브" in store_name or "T08" in theme_state)
+    
+    # DT 판별 (공식 T01 코드 또는 매장명 DT)
+    is_dt = bool("T01" in theme_state or re.search(r"\bDT\b|드라이브스루", store_name, re.I))
+
+    # Reserve 판별 (공식 T03 코드, 또는 매장명 리저브/R 표기. 단 DSR/SDR 등 사내약어 제외)
+    has_t03 = "T03" in theme_state
+    has_r_name = bool(
+        "리저브" in store_name or
+        (re.search(r"R$|R\s|R점", store_name) and not re.search(r"DSR|SDR", store_name, re.I))
+    )
+    is_reserve = bool(has_t03 or has_r_name)
+
     is_community = bool("커뮤니티" in store_name)
     is_new = bool(raw.get("new_icon") == "Y" or raw.get("new_bool") == 1)
 
-    if is_dt:
-        store_type = "DT"
+    if is_dt and is_reserve:
+        store_type = "Reserve DT"
     elif is_reserve:
         store_type = "Reserve"
+    elif is_dt:
+        store_type = "DT"
     elif is_community:
         store_type = "Community"
     else:

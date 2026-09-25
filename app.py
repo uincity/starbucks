@@ -83,12 +83,13 @@ if menu == "1. 전국 Overview":
     tot_12m_closed = rank_df["closed_12m"].sum()
     tot_12m_net = tot_12m_opened - tot_12m_closed
 
-    col1, col2, col3, col4, col5 = st.columns(5)
+    col1, col2, col3, col4, col5, col6 = st.columns(6)
     col1.metric("전국 운영 매장 수", f"{curr_stores:,}개")
-    col2.metric("최근 12개월 신규 개점", f"+{tot_12m_opened:,}개")
+    col2.metric("최근 12개월 신규", f"+{tot_12m_opened:,}개")
     col3.metric("최근 12개월 폐점", f"-{tot_12m_closed:,}개")
     col4.metric("최근 12개월 순증가", f"{tot_12m_net:+,}개", delta=f"{tot_12m_net} net")
-    col5.metric("DT 점유율 (전국)", f"{dt_stores/curr_stores*100:.1f}%", f"{dt_stores}개 DT")
+    col5.metric("DT (드라이브스루)", f"{dt_stores}개", f"{dt_stores/curr_stores*100:.1f}%")
+    col6.metric("Reserve (리저브)", f"{res_stores}개", f"{res_stores/curr_stores*100:.1f}%")
 
     st.markdown("---")
 
@@ -142,12 +143,14 @@ elif menu == "2. 상권 Momentum 순위 & 4분면":
     )
 
     # 필터
-    col_f1, col_f2, col_f3 = st.columns(3)
+    col_f1, col_f2, col_f3, col_f4 = st.columns(4)
     with col_f1:
         sido_filter = st.multiselect("시도 필터", options=sorted(rank_df["sido"].unique()), default=[])
     with col_f2:
         status_filter = st.multiselect("모멘텀 상태 필터", options=sorted(rank_df["momentum_status"].unique()), default=[])
     with col_f3:
+        type_filter = st.selectbox("매장 유형/특성 필터", options=["전체", "리저브(Reserve) 보유 지역", "DT(드라이브스루) 50% 이상"])
+    with col_f4:
         min_stores = st.slider("최소 매장 수 필터", min_value=1, max_value=50, value=2)
 
     filtered_rank = rank_df[rank_df["store_count_current"] >= min_stores].copy()
@@ -155,6 +158,10 @@ elif menu == "2. 상권 Momentum 순위 & 4분면":
         filtered_rank = filtered_rank[filtered_rank["sido"].isin(sido_filter)]
     if status_filter:
         filtered_rank = filtered_rank[filtered_rank["momentum_status"].isin(status_filter)]
+    if type_filter == "리저브(Reserve) 보유 지역":
+        filtered_rank = filtered_rank[filtered_rank["reserve_count"] > 0]
+    elif type_filter == "DT(드라이브스루) 50% 이상":
+        filtered_rank = filtered_rank[filtered_rank["dt_share"] >= 50.0]
 
     # 4분면 매트릭스 산점도
     st.subheader("🎯 상권 변화 4분면 매트릭스 (직전 12M vs 최근 12M 순증감)")
@@ -368,11 +375,13 @@ elif menu == "4. 신규·폐점 공간 지도":
         if row["current_status"] == "CLOSED":
             return "폐점 매장 (Closed)"
         elif row["opened_dt"] >= cutoff_dt:
-            return "신규 개점 매장 (New Open)"
-        elif row["is_dt"]:
-            return "드라이브스루 (DT)"
+            return "최근 신규 개점 (New Open)"
+        elif row["is_reserve"] and row["is_dt"]:
+            return "리저브 DT (Reserve DT)"
         elif row["is_reserve"]:
             return "리저브 (Reserve)"
+        elif row["is_dt"]:
+            return "드라이브스루 (DT)"
         else:
             return "일반 매장 (General)"
 
@@ -386,9 +395,10 @@ elif menu == "4. 신규·폐점 공간 지도":
         hover_name="store_name",
         hover_data=["sido", "sigungu", "opened_date_best", "store_type"],
         color_discrete_map={
-            "신규 개점 매장 (New Open)": "#ff4d4f",
+            "최근 신규 개점 (New Open)": "#ff4d4f",
+            "리저브 (Reserve)": "#d4af37",
+            "리저브 DT (Reserve DT)": "#722ed1",
             "드라이브스루 (DT)": "#1890ff",
-            "리저브 (Reserve)": "#faad14",
             "일반 매장 (General)": "#52c41a",
             "폐점 매장 (Closed)": "#8c8c8c",
         },
@@ -397,7 +407,7 @@ elif menu == "4. 신규·폐점 공간 지도":
         mapbox_style="open-street-map",
         height=700,
     )
-    st.plotly_chart(fig_map, use_container_width=True)
+    st.plotly_chart(fig_map)
 
 # -------------------------------------------------------------
 # 메뉴 5: 개별 매장 History 검색
