@@ -58,6 +58,8 @@ menu = st.sidebar.radio(
 )
 
 st.sidebar.markdown("---")
+st.sidebar.link_button("제작자: 열심남", "https://uincity.github.io/", use_container_width=True)
+
 st.sidebar.info(
     "💡 **분석 원칙**\n"
     "스타벅스 출점을 상권 성장의 직접적 인과로 단정하지 않고, "
