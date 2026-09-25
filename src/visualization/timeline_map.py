@@ -889,10 +889,10 @@ def generate_timeline_html(payload: Dict[str, Any]) -> str:
       attributionControl: false,
     }});
 
-    // CartoDB Positron Neutral Basemap
-    L.tileLayer('https://{{s}}.basemaps.cartocdn.com/rastertiles/voyager/{{z}}/{{x}}/{{y}}{{r}}.png', {{
+    // 100% 무료 & API 키가 일체 필요 없는 OpenStreetMap 공식 타일 레이어
+    L.tileLayer('https://tile.openstreetmap.org/{{z}}/{{x}}/{{y}}.png', {{
       maxZoom: 19,
-      subdomains: 'abcd',
+      attribution: '&copy; OpenStreetMap contributors'
     }}).addTo(state.map);
 
     // 자동 Bounds 맞춤
