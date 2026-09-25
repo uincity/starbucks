@@ -210,61 +210,136 @@ elif menu == "2. 상권 Momentum 순위 & 4분면":
 # -------------------------------------------------------------
 elif menu == "3. 지역 심층 분석 (Drill-down)":
     st.title("🔍 지역 심층 드릴다운 (Drill-down)")
+    st.markdown("선택한 시도의 시군구별 매장 수 순위를 확인하고, **막대를 클릭하여 하단 상세 분석을 실시간 연동**할 수 있습니다.")
 
-    col_sel1, col_sel2 = st.columns(2)
-    with col_sel1:
-        selected_sido = st.selectbox("시도 선택", options=sorted(rank_df["sido"].unique()), index=0)
-    with col_sel2:
-        sigungu_opts = sorted(rank_df[rank_df["sido"] == selected_sido]["sigungu"].unique())
-        selected_sigungu = st.selectbox("시군구 선택", options=sigungu_opts, index=0)
+    # 1. 시도 선택
+    sido_list = sorted(rank_df["sido"].unique())
+    selected_sido = st.selectbox("시도 선택", options=sido_list, index=0)
 
-    area_key = f"{selected_sido} {selected_sigungu}"
-    area_info = rank_df[rank_df["area_name"] == area_key]
+    # 2. 해당 시도의 시군구 데이터 필터링 (매장수 0 초과만 포함, 매장수 상위 순 정렬)
+    sido_rank_df = rank_df[(rank_df["sido"] == selected_sido) & (rank_df["store_count_current"] > 0)].copy()
+    sido_rank_df = sido_rank_df.sort_values("store_count_current", ascending=False).reset_index(drop=True)
 
-    if not area_info.empty:
-        info = area_info.iloc[0]
-        st.subheader(f"📍 {area_key} 상권 프로파일")
+    if sido_rank_df.empty:
+        st.warning(f"선택하신 {selected_sido}에는 현재 운영 중인 스타벅스 매장이 없습니다.")
+    else:
+        sigungu_options = sido_rank_df["sigungu"].tolist()
 
-        m1, m2, m3, m4, m5 = st.columns(5)
-        m1.metric("현재 매장 수", f"{info['store_count_current']}개")
-        m2.metric("최근 12M 순증감", f"{info['net_change_12m']:+d}개")
-        m3.metric("출점 가속도", f"{info['opening_acceleration']:+d}개")
-        m4.metric("DT 점유율", f"{info['dt_share']}% ({info['dt_count']}개)")
-        m5.metric("SB 모멘텀 스코어", f"{info['sb_momentum_score']}점", f"상태: {info['momentum_status']}")
+        # 세션 상태로 현재 선택된 시군구 추적 (기본값: 1위 시군구)
+        state_key = f"drill_sigungu_{selected_sido}"
+        if state_key not in st.session_state or st.session_state[state_key] not in sigungu_options:
+            st.session_state[state_key] = sigungu_options[0]
 
-        # 시계열 추이
-        sub_monthly = monthly_df[monthly_df["area_name"] == area_key].sort_values("year_month")
-        fig_sub = px.line(
-            sub_monthly,
-            x="year_month",
-            y="stores_end",
-            markers=True,
-            title=f"{area_key} 매장 수 월별 시계열 변화",
-            labels={"year_month": "연월", "stores_end": "매장 수"},
+        current_selected = st.session_state[state_key]
+
+        # 3. 상단 시군구별 매장 수 막대그래프 (선택된 시군구 강조 색상 부여)
+        sido_rank_df["bar_color"] = sido_rank_df["sigungu"].apply(
+            lambda x: "#e67e22" if x == current_selected else "#006241"
+        )
+
+        fig_bar = px.bar(
+            sido_rank_df,
+            x="sigungu",
+            y="store_count_current",
+            text="store_count_current",
+            title=f"📊 {selected_sido} 시군구별 스타벅스 매장 수 (상위 정렬 · 막대 클릭 시 하단 연동)",
+            labels={"sigungu": "시군구", "store_count_current": "현재 매장 수 (개)"},
             template="plotly_white",
         )
-        fig_sub.update_traces(line_color="#1e3932", line_width=2)
-        st.plotly_chart(fig_sub, use_container_width=True)
-
-        # 해당 지역 매장 목록
-        st.subheader(f"🏪 {area_key} 매장 목록")
-        area_stores = history_df[(history_df["sido"] == selected_sido) & (history_df["sigungu"] == selected_sigungu)]
-        st.dataframe(
-            area_stores[[
-                "store_name", "store_type", "opened_date_best", "current_status",
-                "closed_date_best", "address_road", "is_dt", "is_reserve"
-            ]].rename(columns={
-                "store_name": "매장명",
-                "store_type": "유형",
-                "opened_date_best": "개점일(추정)",
-                "current_status": "운영상태",
-                "closed_date_best": "폐점일",
-                "address_road": "도로명주소",
-                "is_dt": "DT여부",
-                "is_reserve": "리저브",
-            }),
-            use_container_width=True,
+        fig_bar.update_traces(
+            marker_color=sido_rank_df["bar_color"],
+            textposition="outside",
+            textfont_size=12,
+            cliponaxis=False,
         )
+        fig_bar.update_layout(
+            xaxis_tickangle=-45 if len(sigungu_options) > 10 else 0,
+            xaxis_title="시군구 (주황색: 현재 선택됨)",
+            yaxis_title="매장 수",
+            hovermode="closest",
+            margin=dict(t=50, b=80, l=40, r=40),
+        )
+
+        # 막대 클릭 이벤트 감지
+        chart_event = st.plotly_chart(
+            fig_bar,
+            on_select="rerun",
+            selection_mode="points",
+            key=f"sigungu_click_chart_{selected_sido}",
+        )
+
+        # 클릭 시 세션 상태 갱신
+        if chart_event and "selection" in chart_event and chart_event["selection"].get("points"):
+            clicked_points = chart_event["selection"]["points"]
+            if clicked_points:
+                clicked_sigungu = clicked_points[0].get("x")
+                if clicked_sigungu and clicked_sigungu in sigungu_options and clicked_sigungu != current_selected:
+                    st.session_state[state_key] = clicked_sigungu
+                    st.rerun()
+
+        # 4. 시군구 선택 셀렉트박스 (막대 클릭과 양방향 연동)
+        sel_idx = sigungu_options.index(st.session_state[state_key]) if st.session_state[state_key] in sigungu_options else 0
+        chosen_sigungu = st.selectbox(
+            "선택된 시군구 (그래프의 막대를 클릭하거나 아래 목록에서 직접 변경 가능)",
+            options=sigungu_options,
+            index=sel_idx,
+            key=f"selectbox_sigungu_{selected_sido}",
+        )
+
+        if chosen_sigungu != st.session_state[state_key]:
+            st.session_state[state_key] = chosen_sigungu
+            st.rerun()
+
+        selected_sigungu = st.session_state[state_key]
+        area_key = f"{selected_sido} {selected_sigungu}"
+        area_info = sido_rank_df[sido_rank_df["area_name"] == area_key]
+
+        # 5. 하단 상세 프로파일 및 시계열 분석 연동
+        if not area_info.empty:
+            info = area_info.iloc[0]
+            st.markdown("---")
+            st.subheader(f"📍 {area_key} 상세 상권 프로파일")
+
+            m1, m2, m3, m4, m5 = st.columns(5)
+            m1.metric("현재 매장 수", f"{info['store_count_current']}개")
+            m2.metric("최근 12M 순증감", f"{info['net_change_12m']:+d}개")
+            m3.metric("출점 가속도", f"{info['opening_acceleration']:+d}개")
+            m4.metric("DT 점유율", f"{info['dt_share']}% ({info['dt_count']}개)")
+            m5.metric("SB 모멘텀 스코어", f"{info['sb_momentum_score']}점", f"상태: {info['momentum_status']}")
+
+            # 월별 시계열 라인 차트
+            sub_monthly = monthly_df[monthly_df["area_name"] == area_key].sort_values("year_month")
+            if not sub_monthly.empty:
+                fig_sub = px.line(
+                    sub_monthly,
+                    x="year_month",
+                    y="stores_end",
+                    markers=True,
+                    title=f"📈 {area_key} 매장 수 월별 시계열 변화 (2021 ~ 현재)",
+                    labels={"year_month": "연월", "stores_end": "매장 수"},
+                    template="plotly_white",
+                )
+                fig_sub.update_traces(line_color="#006241", line_width=2.5)
+                st.plotly_chart(fig_sub)
+
+            # 해당 지역 매장 목록 테이블
+            st.subheader(f"🏪 {area_key} 매장 상세 목록")
+            area_stores = history_df[(history_df["sido"] == selected_sido) & (history_df["sigungu"] == selected_sigungu)]
+            st.dataframe(
+                area_stores[[
+                    "store_name", "store_type", "opened_date_best", "current_status",
+                    "closed_date_best", "address_road", "is_dt", "is_reserve"
+                ]].rename(columns={
+                    "store_name": "매장명",
+                    "store_type": "유형",
+                    "opened_date_best": "개점일(추정)",
+                    "current_status": "운영상태",
+                    "closed_date_best": "폐점일",
+                    "address_road": "도로명주소",
+                    "is_dt": "DT여부",
+                    "is_reserve": "리저브",
+                }),
+            )
 
 # -------------------------------------------------------------
 # 메뉴 4: 신규·폐점 공간 지도
